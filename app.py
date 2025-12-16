@@ -4,204 +4,280 @@ from io import BytesIO
 import zipfile
 import os
 import time
+import numpy as np
+from openpyxl import Workbook
 
-# --- FUNCIONES AUXILIARES ---
+# =========================================================
+# CONFIGURACIÓN DE PÁGINA (CENTRADA)
+# =========================================================
+
+st.set_page_config(
+    page_title="Generador Prinex - Payhawk",
+    layout="centered"
+)
+
+st.markdown(
+    """
+    <style>
+        .block-container {
+            max-width: 900px;
+            margin: auto;
+            padding-top: 2rem;
+        }
+
+        h1, h2, h3 {
+            text-align: center;
+        }
+
+        div.stButton > button {
+            width: 100%;
+            font-size: 1.1rem;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# =========================================================
+# PLANTILLA PRINEX FIJA
+# =========================================================
+
+COLUMNAS_PLANTILLA_PRINEX = [
+    "SOCIEDAD","ORDEN","CIF","CODIGO","NUM.FRA","FECHA.FRA","FECHA.CONTABLE",
+    "DIARIO_CONTB","IMP.BRUTO","TOTAL","OP.ALQ","D347","TIPO.FRA","SUJ_RECC",
+    "DELEGACION","BASE_RETENCION","PORCENTAJE_RETENCION","IMPORTE_RETENCION",
+    "APLICAR_RETENCION","BASE_IRPF","PORCENTAJE_IRPF","IMPORTE_IRPF",
+    "CLAVE_IRPF","SUBCLAVE_IRPF","CEUTA","CONCEPTO","CTA_ACREEDORA",
+    "SCTA_ACREEDORA","CTA_GARANTIA","SCTA_GARANTIA","CTA_IRPF","SCTA_IRPF",
+    "CTA_IVAD","SCTA_IVAD","CONDICIONES","PAGADA","CTA_BANCO","SCTA_BANCO",
+    "APUNTE","AUTOREPE_INVE_SUJE_PASI","SERIE_AUTOREPE","DIARIO_AUTOREPE",
+    "TIPO_FRA_SII","CLAVE_RE","CLAVE_RE_AD1","CLAVE_RE_AD2","TIPO_OP_INTRA",
+    "DESC_BIENES","DESCRIPCION_OP","SIMPLIFICADA","FRA_SIMPLI_IDEN",
+    "BIEN_ART25","DOCU_ART25","PROT_ART25","NOTA_ART25",
+    "DIARIO1","BASE1","IVA1","CUOTA1",
+    "DIARIO2","BASE2","IVA2","CUOTA2",
+    "DIARIO3","BASE3","IVA3","CUOTA3",
+    "DIARIO4","BASE4","IVA4","CUOTA4",
+    "DIARIO5","BASE5","IVA5","CUOTA5",
+    "PROYECTO","TIPO_INMUEBLE","CLAVE1","CLAVE2","CLAVE3","CLAVE4",
+    "IMPORTE_GASTO","TIPO_PARTIDA","APARTADO","CAPITULO","PARTIDA",
+    "CTA_GASTO","SCTA_GASTO","COD_COEF","NOMBRE","CARACTERISTICA","RUTA","ETAPA"
+]
+
+def crear_plantilla_prinex_vacia():
+    return pd.DataFrame(columns=COLUMNAS_PLANTILLA_PRINEX)
+
+# =========================================================
+# FUNCIONES AUXILIARES
+# =========================================================
 
 def convertir_df_a_excel(df):
-    """Convierte un DataFrame a un archivo Excel en memoria (bytes)."""
+    """
+    Convierte un DataFrame a Excel plano, sin negrita ni bordes ni colores.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Plantilla Prinex"
+
+    # Escribir encabezados (solo texto)
+    ws.append(list(df.columns))
+
+    # Escribir filas de datos
+    for row in df.itertuples(index=False):
+        ws.append(list(row))
+
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Plantilla Prinex')
+    wb.save(output)
     return output.getvalue()
 
-def validar_archivos_cargados(zip_bytes, df_plantilla):
-    """
-    Realiza una validación completa de ambos archivos y devuelve una lista de todos los errores encontrados.
-    """
-    lista_errores = []
+def validar_archivos_cargados(zip_bytes):
+    errores = []
+    csv_ok = False
+    pdf_ok = False
 
-    # 1. Validación del contenido del ZIP
-    csv_encontrado = False
-    pdf_encontrado = False
     with zipfile.ZipFile(BytesIO(zip_bytes)) as zip_ref:
-        for nombre_archivo in zip_ref.namelist():
-            if nombre_archivo.lower().endswith('.csv'):
-                csv_encontrado = True
-            elif nombre_archivo.lower().endswith('.pdf'):
-                pdf_encontrado = True
-    
-    if not csv_encontrado:
-        lista_errores.append("El archivo ZIP no contiene el archivo CSV de Payhawk requerido.")
-    
-    if not pdf_encontrado:
-        lista_errores.append("El archivo ZIP no contiene ninguna factura en formato PDF.")
+        for nombre in zip_ref.namelist():
+            if nombre.lower().endswith(".csv"):
+                csv_ok = True
+            elif nombre.lower().endswith(".pdf"):
+                pdf_ok = True
 
-    # 2. Validación de la estructura de la plantilla Prinex
-    columnas_requeridas_prinex = [
-        'SOCIEDAD', 'ORDEN', 'CODIGO', 'TOTAL', 'OP.ALQ', 'D347', 
-        'TIPO.FRA', 'DIARIO1', 'BASE1', 'IVA1', 'CUOTA1', 'PROYECTO', 
-        'IMPORTE_GASTO', 'CTA_GASTO', 'SCTA_GASTO', 'NOMBRE', 
-        'CARACTERISTICA', 'RUTA', 'ETAPA'
-    ]
-    columnas_actuales = df_plantilla.columns.str.strip().tolist()
-    columnas_faltantes = [col for col in columnas_requeridas_prinex if col not in columnas_actuales]
+    if not csv_ok:
+        errores.append("El ZIP no contiene el archivo CSV de Payhawk.")
+    if not pdf_ok:
+        errores.append("El ZIP no contiene facturas en PDF.")
 
-    if columnas_faltantes:
-        error_cols = f"La plantilla de Prinex no es correcta. Faltan o están mal escritas las siguientes columnas: **{', '.join(columnas_faltantes)}**"
-        lista_errores.append(error_cols)
-        
-    return lista_errores
+    return errores
 
-# --- FUNCIÓN DE PROCESAMIENTO PRINCIPAL ---
+# =========================================================
+# PROCESAMIENTO PRINCIPAL
+# =========================================================
 
-def procesar_zip_payhawk(zip_bytes_payhawk, df_plantilla_prinex):
-    """
-    Función que procesa el ZIP de Payhawk y rellena la plantilla de Prinex.
-    ASUME que las validaciones de archivos ya se han realizado.
-    """
-    st.write("1. Descomprimiendo archivo ZIP de Payhawk...")
+def procesar_zip_payhawk(zip_bytes_payhawk):
+    st.write("### 1️⃣ Descomprimiendo ZIP de Payhawk")
+
     df_payhawk = None
     archivos_pdf = {}
+
     with zipfile.ZipFile(BytesIO(zip_bytes_payhawk)) as zip_ref:
-        for nombre_archivo in zip_ref.namelist():
-            if nombre_archivo.lower().endswith('.csv'):
-                st.write(f"   - Archivo CSV (PAYHAWK) encontrado: `{nombre_archivo}`")
-                with zip_ref.open(nombre_archivo) as f:
+        for nombre in zip_ref.namelist():
+            if nombre.lower().endswith(".csv"):
+                with zip_ref.open(nombre) as f:
                     df_payhawk = pd.read_csv(f)
-            elif nombre_archivo.lower().endswith('.pdf'):
-                nombre_base = os.path.basename(nombre_archivo)
-                archivos_pdf[nombre_base] = zip_ref.read(nombre_archivo)
-    st.write("✅ Descompresión completada.")
+            elif nombre.lower().endswith(".pdf"):
+                archivos_pdf[os.path.basename(nombre)] = zip_ref.read(nombre)
 
-    st.write("2. Mapeando datos...")
+    st.success("ZIP descomprimido correctamente")
+
+    st.write("### 2️⃣ Mapeando datos a Prinex")
+
     df_payhawk.columns = df_payhawk.columns.str.strip()
-    df_plantilla_prinex.columns = df_plantilla_prinex.columns.str.strip()
-    num_filas = len(df_payhawk)
-    df_prinex_final = pd.DataFrame(columns=df_plantilla_prinex.columns, index=range(num_filas))
+    df_prinex = crear_plantilla_prinex_vacia()
+    df_prinex = pd.DataFrame(index=range(len(df_payhawk)), columns=df_prinex.columns)
 
-    df_prinex_final['SOCIEDAD'] = 666
-    df_prinex_final['CODIGO'] = 4444
-    df_prinex_final['DIARIO_CONTB'] = 1
-    df_prinex_final['OP.ALQ'] = 'N'
-    df_prinex_final['D347'] = 'S'
-    df_prinex_final['TIPO.FRA'] = 'F'
-    df_prinex_final['DIARIO1'] = 1
-    df_prinex_final['CARACTERISTICA'] = 'Facturas payhawk'
-    df_prinex_final['RUTA'] = 1
-    df_prinex_final['ETAPA'] = 'PRODUCCIÓN'
+    # -----------------------------------------------------
+    # VALORES FIJOS
+    # -----------------------------------------------------
+    df_prinex["SOCIEDAD"] = 666
+    df_prinex["DIARIO_CONTB"] = 1
+    df_prinex["OP.ALQ"] = "N"
+    df_prinex["D347"] = "N"
+    df_prinex["DIARIO1"] = 1
 
+    df_prinex["PAGADA"] = "S"
+    df_prinex["CTA_BANCO"] = "5720"
+    df_prinex["SCTA_BANCO"] = "001"
+    df_prinex["APUNTE"] = "S"
+
+    df_prinex["CARACTERISTICA"] = "Facturas Escaneadas"
+    df_prinex["CONDICIONES"] = "COMPTAT"
+    df_prinex["RUTA"] = 9
+    df_prinex["ETAPA"] = "CARGA PAYHAWK"
+
+    # -----------------------------------------------------
+    # TIPO.FRA y CODIGO condicional según Document Type
+    # -----------------------------------------------------
+    df_prinex["TIPO.FRA"] = np.where(
+        df_payhawk["Document Type"] == "Receipt",
+        "C",
+        np.where(df_payhawk["Document Type"] == "Invoice", "F", "")
+    )
+
+    df_prinex["CODIGO"] = np.where(
+        df_payhawk["Document Type"] == "Receipt",
+        4444,
+        df_payhawk["Supplier External ID"]
+    )
+
+    # -----------------------------------------------------
+    # MAPEOS PAYHAWK → PRINEX
+    # -----------------------------------------------------
     column_map = {
-        'ORDEN': 'Expense ID', 'NUM.FRA': 'Document Number', 'IMP.BRUTO': 'Net Amount (EUR)',
-        'TOTAL': 'Total Amount (EUR)', 'BASE1': 'Net Amount (EUR)', 'IVA1': 'Tax Rate %',
-        'CUOTA1': 'Tax Amount (EUR)', 'PROYECTO': 'Promoción External ID',
-        'IMPORTE_GASTO': 'Net Amount (EUR)', 'NOMBRE': 'File Name 1'
+        "ORDEN": "Expense ID",
+        "NUM.FRA": "Document Number",
+        "IMP.BRUTO": "Net Amount (EUR)",
+        "TOTAL": "Total Amount (EUR)",
+        "BASE1": "Net Amount (EUR)",
+        "IVA1": "Tax Rate %",
+        "CUOTA1": "Tax Amount (EUR)",
+        "PROYECTO": "Promoción External ID",
+        "IMPORTE_GASTO": "Net Amount (EUR)",
+        "NOMBRE": "File Name 1"
     }
+
     for prinex_col, payhawk_col in column_map.items():
         if payhawk_col in df_payhawk.columns:
-            df_prinex_final[prinex_col] = df_payhawk[payhawk_col]
-        else:
-            st.warning(f"Advertencia: La columna '{payhawk_col}' no se encontró en PAYHAWK. La columna '{prinex_col}' quedará vacía.")
+            df_prinex[prinex_col] = df_payhawk[payhawk_col]
 
-    if 'Document Date' in df_payhawk.columns:
-        df_prinex_final['FECHA.FRA'] = pd.to_datetime(df_payhawk['Document Date'], errors='coerce').dt.strftime('%d/%m/%Y')
-    else:
-        st.warning("Advertencia: La columna 'Document Date' no se encontró en PAYHAWK. 'FECHA.FRA' quedará vacía.")
+    # -----------------------------------------------------
+    # FECHAS
+    # -----------------------------------------------------
+    if "Document Date" in df_payhawk.columns:
+        df_prinex["FECHA.FRA"] = pd.to_datetime(
+            df_payhawk["Document Date"], errors="coerce"
+        ).dt.strftime("%d/%m/%Y")
 
-    if 'Account Code' in df_payhawk.columns:
-        split_data = df_payhawk['Account Code'].astype(str).str.split('-', n=1, expand=True)
-        df_prinex_final['CTA_GASTO'] = split_data[0]
-        df_prinex_final['SCTA_GASTO'] = split_data[1].fillna('') if 1 in split_data.columns else ''
-    else:
-        st.warning("Advertencia: 'Account Code' no encontrada en PAYHAWK. 'CTA_GASTO' y 'SCTA_GASTO' quedarán vacías.")
-    
-    df_prinex_final = df_prinex_final.fillna('')
-    st.write("✅ Mapeo de datos completado.")
-    return df_prinex_final, archivos_pdf
+    if "Created Date" in df_payhawk.columns:
+        df_prinex["FECHA.CONTABLE"] = pd.to_datetime(
+            df_payhawk["Created Date"], errors="coerce"
+        ).dt.strftime("%d/%m/%Y")
 
-# --- INTERFAZ DE USUARIO DE STREAMLIT ---
+    # -----------------------------------------------------
+    # CTA / SCTA GASTO
+    # -----------------------------------------------------
+    if "Account Code" in df_payhawk.columns:
+        split = df_payhawk["Account Code"].astype(str).str.split("-", n=1, expand=True)
+        df_prinex["CTA_GASTO"] = split[0]
+        df_prinex["SCTA_GASTO"] = split[1].fillna("") if 1 in split.columns else ""
 
-st.set_page_config(page_title="Generador de Carga Prinex", layout="wide")
-st.title("🚀 Generador de Carga Masiva para Prinex desde Payhawk")
-st.write("Esta herramienta automatiza la creación de la plantilla de carga para Prinex y empaqueta las facturas correspondientes.")
+    df_prinex = df_prinex.fillna("")
+    st.success("Mapeo completado correctamente")
 
-if 'procesado' not in st.session_state:
+    return df_prinex, archivos_pdf
+
+# =========================================================
+# INTERFAZ STREAMLIT
+# =========================================================
+
+st.title("🚀 Generador de Carga Masiva Prinex desde Payhawk")
+
+st.info(
+    "Sube el archivo ZIP descargado desde Payhawk. "
+    "La plantilla Prinex se genera automáticamente."
+)
+
+if "procesado" not in st.session_state:
     st.session_state.procesado = False
-    st.session_state.zip_final_bytes = None
+    st.session_state.zip_final = None
     st.session_state.df_preview = None
 
-col1, col2 = st.columns(2)
-with col1:
-    st.header("1. Cargar ZIP de Payhawk")
-    st.info("Sube el archivo .zip que descargas desde Payhawk. Debe contener un archivo .csv y las facturas en .pdf.")
-    archivo_zip_payhawk = st.file_uploader("Selecciona el archivo ZIP", type=['zip'], key="payhawk_zip")
-with col2:
-    st.header("2. Cargar Plantilla Prinex")
-    st.info("Sube la plantilla de Excel (.xlsx) vacía con la estructura correcta para la importación en Prinex.")
-    archivo_plantilla_prinex = st.file_uploader("Selecciona el archivo de Prinex (.xlsx)", type=['xlsx'], key="prinex_template")
+st.header("📦 Cargar ZIP de Payhawk")
+archivo_zip = st.file_uploader("Selecciona el archivo ZIP", type=["zip"])
 
 st.divider()
-st.header("3. Generar Archivo de Carga")
 
-if st.button("✨ Generar Archivo ZIP para subir datos a Prinex", type="primary"):
-    if archivo_zip_payhawk is not None and archivo_plantilla_prinex is not None:
+if st.button("✨ Generar archivo de carga para Prinex", type="primary"):
+    if archivo_zip is None:
+        st.warning("Debes subir el ZIP de Payhawk.")
+    else:
         try:
-            # --- FASE DE VALIDACIÓN CONSOLIDADA ---
-            st.write("Iniciando validaciones previas...")
-            zip_bytes = archivo_zip_payhawk.getvalue()
-            df_plantilla = pd.read_excel(archivo_plantilla_prinex)
-            
-            # Llamamos a la función que revisa todo y devuelve una lista de errores
-            errores_encontrados = validar_archivos_cargados(zip_bytes, df_plantilla)
+            zip_bytes = archivo_zip.getvalue()
+            errores = validar_archivos_cargados(zip_bytes)
 
-            # Si la lista de errores NO está vacía, los mostramos todos y detenemos
-            if errores_encontrados:
-                mensaje_error_final = "**Se encontraron los siguientes problemas en los archivos cargados:**\n"
-                for error in errores_encontrados:
-                    mensaje_error_final += f"\n- {error}"
-                st.error(mensaje_error_final)
-                st.session_state.procesado = False
+            if errores:
+                st.error("**Errores encontrados:**\n" + "\n".join(f"- {e}" for e in errores))
             else:
-                # Si no hay errores, procedemos con el procesamiento
-                st.write("✅ Todas las validaciones son correctas. Iniciando procesamiento...")
-                tiempo_inicio = time.time()
-                with st.spinner('Procesando archivos...'):
-                    df_prinex_final, archivos_pdf = procesar_zip_payhawk(zip_bytes, df_plantilla)
-                    
-                    st.write("3. Creando el archivo Excel final...")
-                    excel_final_bytes = convertir_df_a_excel(df_prinex_final)
-                    st.write("✅ Archivo Excel generado.")
-                    
-                    st.write("4. Creando el archivo ZIP de salida...")
-                    zip_buffer_salida = BytesIO()
-                    with zipfile.ZipFile(zip_buffer_salida, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-                        zip_file.writestr("plantilla_prinex_cargada.xlsx", excel_final_bytes)
-                        for nombre_pdf, bytes_pdf in archivos_pdf.items():
-                            zip_file.writestr(f"facturas/{nombre_pdf}", bytes_pdf)
-                    st.write("✅ Archivo ZIP de salida creado.")
+                inicio = time.time()
+                with st.spinner("Procesando archivos..."):
+                    df_final, pdfs = procesar_zip_payhawk(zip_bytes)
+                    excel_bytes = convertir_df_a_excel(df_final)
 
-                tiempo_fin = time.time()
-                st.success(f"¡Proceso completado con éxito en {tiempo_fin - tiempo_inicio:.2f} segundos!")
-                
+                    zip_salida = BytesIO()
+                    with zipfile.ZipFile(zip_salida, "w", zipfile.ZIP_DEFLATED) as z:
+                        z.writestr("plantilla_prinex.xlsx", excel_bytes)
+                        for nombre, contenido in pdfs.items():
+                            z.writestr(f"facturas/{nombre}", contenido)
+
                 st.session_state.procesado = True
-                st.session_state.zip_final_bytes = zip_buffer_salida.getvalue()
-                st.session_state.df_preview = df_prinex_final.head()
+                st.session_state.zip_final = zip_salida.getvalue()
+                st.session_state.df_preview = df_final.head()
+
+                st.success(f"Proceso completado en {time.time() - inicio:.2f} segundos")
 
         except Exception as e:
-            st.error(f"Ha ocurrido un error inesperado durante la ejecución: {e}")
-            st.session_state.procesado = False
-    else:
-        st.warning("⚠️ Debes cargar ambos archivos para poder generar el archivo de carga.")
+            st.error(f"Error inesperado: {e}")
 
 if st.session_state.procesado:
     st.divider()
-    st.header("4. Descargar Resultados")
-    st.subheader("Previsualización de la Plantilla Generada (5 primeras filas)")
+    st.header("📥 Descargar resultados")
+
+    st.subheader("Vista previa (5 primeras filas)")
     st.dataframe(st.session_state.df_preview)
+
     st.download_button(
-        label="📥 Descargar TODO (.zip)",
-        data=st.session_state.zip_final_bytes,
+        label="Descargar ZIP final",
+        data=st.session_state.zip_final,
         file_name="carga_prinex_con_facturas.zip",
         mime="application/zip",
         type="primary"
     )
-    st.info("El archivo ZIP descargado contiene la plantilla de Excel rellenada y una carpeta con todas las facturas en PDF.")
