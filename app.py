@@ -1,3 +1,4 @@
+import datetime
 import streamlit as st
 import pandas as pd
 from io import BytesIO
@@ -113,7 +114,7 @@ def validar_archivos_cargados(zip_bytes):
 # PROCESAMIENTO PRINCIPAL
 # =========================================================
 
-def procesar_zip_payhawk(zip_bytes_payhawk):
+def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
     st.write("### 1️⃣ Descomprimiendo ZIP de Payhawk")
 
     df_payhawk = None
@@ -149,7 +150,7 @@ def procesar_zip_payhawk(zip_bytes_payhawk):
     df_prinex["SCTA_BANCO"] = "001"
     df_prinex["APUNTE"] = "S"
 
-    df_prinex["CARACTERISTICA"] = "Facturas Escaneadas"
+    df_prinex["CARACTERISTICA"] = "PAYHAWK"
     df_prinex["CONDICIONES"] = "COMPTAT"
     df_prinex["RUTA"] = 9
     df_prinex["ETAPA"] = "CARGA PAYHAWK"
@@ -161,6 +162,12 @@ def procesar_zip_payhawk(zip_bytes_payhawk):
         df_payhawk["Document Type"] == "Receipt",
         "C",
         np.where(df_payhawk["Document Type"] == "Invoice", "F", "")
+    )
+
+    df_prinex["TIPO.FRA"] = np.where(
+        df_payhawk["Payment Type"] == "mileage",
+        "C",
+        df_prinex["TIPO.FRA"]
     )
 
     df_prinex["CODIGO"] = np.where(
@@ -186,8 +193,26 @@ def procesar_zip_payhawk(zip_bytes_payhawk):
     }
 
     for prinex_col, payhawk_col in column_map.items():
-        if payhawk_col in df_payhawk.columns:
+        if payhawk_col not in df_payhawk.columns:
+            continue
+
+        if prinex_col == "NUM.FRA":
+            df_prinex[prinex_col] = np.where(
+                df_payhawk["Payment Type"] == "mileage",
+                "KM-" + df_payhawk["Expense ID"].astype(str),
+                df_payhawk[payhawk_col]
+            )
+        else:
             df_prinex[prinex_col] = df_payhawk[payhawk_col]
+
+    mask_c = df_prinex["TIPO.FRA"] == "C"
+
+    df_prinex.loc[mask_c, "IMP.BRUTO"] = df_payhawk.loc[mask_c, "Total Amount (EUR)"]
+    df_prinex.loc[mask_c, "BASE1"] = df_payhawk.loc[mask_c, "Total Amount (EUR)"]
+    df_prinex.loc[mask_c, "IMPORTE_GASTO"] = df_payhawk.loc[mask_c, "Total Amount (EUR)"]
+
+    df_prinex.loc[mask_c, ["IVA1", "CUOTA1"]] = 0
+
 
     # -----------------------------------------------------
     # FECHAS
@@ -197,11 +222,9 @@ def procesar_zip_payhawk(zip_bytes_payhawk):
             df_payhawk["Document Date"], errors="coerce"
         ).dt.strftime("%d/%m/%Y")
 
-    if "Created Date" in df_payhawk.columns:
-        df_prinex["FECHA.CONTABLE"] = pd.to_datetime(
-            df_payhawk["Created Date"], errors="coerce"
-        ).dt.strftime("%d/%m/%Y")
-
+    fecha_formateada = fecha_elegida.strftime("%d/%m/%Y")
+    df_prinex["FECHA.CONTABLE"] = fecha_formateada
+    
     # -----------------------------------------------------
     # CTA / SCTA GASTO
     # -----------------------------------------------------
@@ -234,6 +257,17 @@ if "procesado" not in st.session_state:
 st.header("📦 Cargar ZIP de Payhawk")
 archivo_zip = st.file_uploader("Selecciona el archivo ZIP", type=["zip"])
 
+fecha_usuario = datetime.date.today()
+
+if archivo_zip is not None:
+    st.write("---")
+    col_fecha, col_vacia = st.columns([1, 2])
+    with col_fecha:
+        fecha_usuario = st.date_input(
+            "📅 Selecciona la Fecha Contable para este archivo:",
+            value=datetime.date.today()
+        )
+
 st.divider()
 
 if st.button("✨ Generar archivo de carga para Prinex", type="primary"):
@@ -249,7 +283,8 @@ if st.button("✨ Generar archivo de carga para Prinex", type="primary"):
             else:
                 inicio = time.time()
                 with st.spinner("Procesando archivos..."):
-                    df_final, pdfs = procesar_zip_payhawk(zip_bytes)
+                    df_final, pdfs = procesar_zip_payhawk(zip_bytes, fecha_usuario)
+                    
                     excel_bytes = convertir_df_a_excel(df_final)
 
                     zip_salida = BytesIO()
