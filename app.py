@@ -155,6 +155,8 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
     df_prinex["RUTA"] = 9
     df_prinex["ETAPA"] = "CARGA PAYHAWK"
 
+    df_prinex["CODIGO"] = 4444
+
     # -----------------------------------------------------
     # TIPO.FRA y CODIGO condicional según Document Type
     # -----------------------------------------------------
@@ -170,11 +172,6 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
         df_prinex["TIPO.FRA"]
     )
 
-    df_prinex["CODIGO"] = np.where(
-        df_payhawk["Document Type"] == "Receipt",
-        4444,
-        df_payhawk["Supplier External ID"]
-    )
 
     # -----------------------------------------------------
     # MAPEOS PAYHAWK → PRINEX
