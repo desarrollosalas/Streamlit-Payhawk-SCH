@@ -126,7 +126,10 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
                 with zip_ref.open(nombre) as f:
                     df_payhawk = pd.read_csv(f)
             elif nombre.lower().endswith(".pdf"):
-                archivos_pdf[os.path.basename(nombre)] = zip_ref.read(nombre)
+                base_name = os.path.basename(nombre)
+
+                if base_name not in archivos_pdf or "(2)" in nombre:
+                    archivos_pdf[base_name] = zip_ref.read(nombre)
 
     st.success("ZIP descomprimido correctamente")
 
@@ -139,7 +142,7 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
     # -----------------------------------------------------
     # VALORES FIJOS
     # -----------------------------------------------------
-    df_prinex["SOCIEDAD"] = 666
+    df_prinex["SOCIEDAD"] = 9800
     df_prinex["DIARIO_CONTB"] = 1
     df_prinex["OP.ALQ"] = "N"
     df_prinex["D347"] = "N"
@@ -172,6 +175,19 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
         df_prinex["TIPO.FRA"]
     )
 
+    df_prinex["CODIGO"] = np.where(
+        df_payhawk["Document Type"] == "Invoice",
+        df_payhawk["Supplier External ID"],
+        4444
+    )
+
+
+    if "Expense Category" in df_payhawk.columns and "Expense Owner" in df_payhawk.columns:
+        df_prinex["CONCEPTO"] = (
+                df_payhawk["Expense Category"].astype(str) + "-" +
+                df_payhawk["Expense Owner"].astype(str) + "-" + 
+                df_payhawk["Promoción External ID"].astype(str).str.split('.').str[0]
+            )
 
     # -----------------------------------------------------
     # MAPEOS PAYHAWK → PRINEX
@@ -186,7 +202,6 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
         "CUOTA1": "Tax Amount (EUR)",
         "PROYECTO": "Promoción External ID",
         "IMPORTE_GASTO": "Net Amount (EUR)",
-        "NOMBRE": "File Name 1"
     }
 
     for prinex_col, payhawk_col in column_map.items():
@@ -202,6 +217,19 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
         else:
             df_prinex[prinex_col] = df_payhawk[payhawk_col]
 
+    # -----------------------------------------------------
+    # LÓGICA DE PRIORIDAD PARA "NOMBRE" (File Name 2 > File Name 1)
+    # -----------------------------------------------------
+    if "File Name 2" in df_payhawk.columns and "File Name 1" in df_payhawk.columns:
+        # Si File Name 2 no es nulo y no está vacío, usamos el 2. Si no, el 1.
+        df_prinex["NOMBRE"] = np.where(
+            (df_payhawk["File Name 2"].notna()) & (df_payhawk["File Name 2"].astype(str).str.strip() != ""),
+            df_payhawk["File Name 2"],
+            df_payhawk["File Name 1"]
+        )
+    elif "File Name 1" in df_payhawk.columns:
+        # Si por alguna razón no existe la columna del 2, usamos el 1
+        df_prinex["NOMBRE"] = df_payhawk["File Name 1"]
     mask_c = df_prinex["TIPO.FRA"] == "C"
 
     df_prinex.loc[mask_c, "IMP.BRUTO"] = df_payhawk.loc[mask_c, "Total Amount (EUR)"]
@@ -228,7 +256,24 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
     if "Account Code" in df_payhawk.columns:
         split = df_payhawk["Account Code"].astype(str).str.split("-", n=1, expand=True)
         df_prinex["CTA_GASTO"] = split[0]
-        df_prinex["SCTA_GASTO"] = split[1].fillna("") if 1 in split.columns else ""
+        sufix_account = split[1]
+
+        def construir_scta_combinada(row):
+            promo_id = str(row.get("Promoción External ID", "")).split('.')[0].strip()
+            
+            idx = row.name
+            sufix = str(sufix_account.iloc[idx]).strip() if idx < len(sufix_account) else ""
+
+            if not promo_id or promo_id.lower() in ["nan", "none"]:
+                return sufix
+            return promo_id + sufix[len(promo_id):]
+
+        df_prinex["SCTA_GASTO"] = df_payhawk.apply(construir_scta_combinada, axis=1)
+
+    columnas_a_texto = ["NUM.FRA", "SCTA_GASTO", "CONCEPTO", "PROYECTO"]
+    for col in columnas_a_texto:
+        if col in df_prinex.columns:
+            df_prinex[col] = df_prinex[col].astype(str).replace(['nan', 'None', 'NaN'], '')
 
     df_prinex = df_prinex.fillna("")
     st.success("Mapeo completado correctamente")
@@ -309,7 +354,7 @@ if st.session_state.procesado:
     st.download_button(
         label="Descargar ZIP final",
         data=st.session_state.zip_final,
-        file_name="carga_prinex_con_facturas.zip",
+        file_name="f_PNX.zip",
         mime="application/zip",
         type="primary"
     )
