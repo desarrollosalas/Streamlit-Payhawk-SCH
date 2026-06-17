@@ -150,7 +150,7 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
 
     df_prinex["PAGADA"] = "S"
     df_prinex["CTA_BANCO"] = "5720"
-    df_prinex["SCTA_BANCO"] = "001"
+    df_prinex["SCTA_BANCO"] = "0000010"
     df_prinex["APUNTE"] = "S"
 
     df_prinex["CARACTERISTICA"] = "PAYHAWK"
@@ -187,7 +187,7 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
                 df_payhawk["Expense Category"].astype(str) + "-" +
                 df_payhawk["Expense Owner"].astype(str) + "-" + 
                 df_payhawk["Promoción External ID"].astype(str).str.split('.').str[0]
-            )
+            ).str[:30]
 
     # -----------------------------------------------------
     # MAPEOS PAYHAWK → PRINEX
@@ -217,19 +217,6 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
         else:
             df_prinex[prinex_col] = df_payhawk[payhawk_col]
 
-    # -----------------------------------------------------
-    # LÓGICA DE PRIORIDAD PARA "NOMBRE" (File Name 2 > File Name 1)
-    # -----------------------------------------------------
-    if "File Name 2" in df_payhawk.columns and "File Name 1" in df_payhawk.columns:
-        # Si File Name 2 no es nulo y no está vacío, usamos el 2. Si no, el 1.
-        df_prinex["NOMBRE"] = np.where(
-            (df_payhawk["File Name 2"].notna()) & (df_payhawk["File Name 2"].astype(str).str.strip() != ""),
-            df_payhawk["File Name 2"],
-            df_payhawk["File Name 1"]
-        )
-    elif "File Name 1" in df_payhawk.columns:
-        # Si por alguna razón no existe la columna del 2, usamos el 1
-        df_prinex["NOMBRE"] = df_payhawk["File Name 1"]
     mask_c = df_prinex["TIPO.FRA"] == "C"
 
     df_prinex.loc[mask_c, "IMP.BRUTO"] = df_payhawk.loc[mask_c, "Total Amount (EUR)"]
@@ -250,6 +237,18 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
     fecha_formateada = fecha_elegida.strftime("%d/%m/%Y")
     df_prinex["FECHA.CONTABLE"] = fecha_formateada
     
+    # -----------------------------------------------------
+    # NOMBRE DEL PDF
+    # -----------------------------------------------------
+    orden_str = df_prinex["ORDEN"].fillna("").astype(str)
+    # Quitamos las barras de la fecha para evitar problemas en nombres de archivo
+    fecha_str = df_prinex["FECHA.FRA"].fillna("").astype(str).str.replace("/", "")
+    concepto_str = df_prinex["CONCEPTO"].fillna("").astype(str)
+    
+    # Concatenamos y limitamos a 96 caracteres para reservar 4 para ".pdf" (Total = 100)
+    nombre_base = orden_str + "_" + fecha_str + "_" + concepto_str
+    df_prinex["NOMBRE"] = nombre_base.str[:96] + ".pdf"
+
     # -----------------------------------------------------
     # CTA / SCTA GASTO
     # -----------------------------------------------------
