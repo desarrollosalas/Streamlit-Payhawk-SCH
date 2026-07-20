@@ -7,6 +7,7 @@ import os
 import time
 import numpy as np
 from openpyxl import Workbook
+from pypdf import PdfWriter
 
 # =========================================================
 # CONFIGURACIÓN DE PÁGINA (CENTRADA)
@@ -275,9 +276,46 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
             df_prinex[col] = df_prinex[col].astype(str).replace(['nan', 'None', 'NaN'], '')
 
     df_prinex = df_prinex.fillna("")
+    
+    # -----------------------------------------------------
+    # RENOMBRAR Y COMBINAR PDFs SEGÚN COLUMNAS 'File Name X'
+    # -----------------------------------------------------
+    pdfs_renombrados = {}
+    file_name_cols = [c for c in df_payhawk.columns if str(c).strip().startswith("File Name")]
+
+    for idx, row_payhawk in df_payhawk.iterrows():
+        nuevo_nombre = str(df_prinex.loc[idx, "NOMBRE"]).strip()
+        
+        # Recolectar todos los PDFs válidos para este gasto
+        pdfs_para_fusionar = []
+        for col in file_name_cols:
+            orig_name = str(row_payhawk[col]).strip()
+            if orig_name and orig_name.lower() not in ["nan", "none", "na", ""]:
+                base_orig = os.path.basename(orig_name)
+                if base_orig in archivos_pdf:
+                    pdfs_para_fusionar.append(archivos_pdf[base_orig])
+        
+        if len(pdfs_para_fusionar) == 1:
+            # Si solo hay uno, lo guardamos tal cual
+            pdfs_renombrados[nuevo_nombre] = pdfs_para_fusionar[0]
+        elif len(pdfs_para_fusionar) > 1:
+            # Si hay más de uno, los combinamos
+            merger = PdfWriter()
+            for pdf_bytes in pdfs_para_fusionar:
+                try:
+                    merger.append(BytesIO(pdf_bytes))
+                except Exception as e:
+                    # En caso de error (por ejemplo si no es un PDF válido) se ignora o se podría hacer un print
+                    pass
+            
+            output_pdf = BytesIO()
+            merger.write(output_pdf)
+            merger.close()
+            pdfs_renombrados[nuevo_nombre] = output_pdf.getvalue()
+
     st.success("Mapeo completado correctamente")
 
-    return df_prinex, archivos_pdf
+    return df_prinex, pdfs_renombrados
 
 # =========================================================
 # INTERFAZ STREAMLIT
