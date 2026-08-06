@@ -137,6 +137,19 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
     st.write("### 2️⃣ Mapeando datos a Prinex")
 
     df_payhawk.columns = df_payhawk.columns.str.strip()
+
+    if "Promoción External ID" in df_payhawk.columns:
+        df_payhawk["Promoción External ID"] = (
+            df_payhawk["Promoción External ID"]
+            .astype(str)
+            .str.split('.')
+            .str[0]
+            .str.strip()
+        )
+        df_payhawk["Promoción External ID"] = df_payhawk["Promoción External ID"].apply(
+            lambda x: x.zfill(3) if x.lower() not in ["nan", "none", ""] else x
+        )
+
     df_prinex = crear_plantilla_prinex_vacia()
     df_prinex = pd.DataFrame(index=range(len(df_payhawk)), columns=df_prinex.columns)
 
@@ -148,7 +161,7 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
     df_prinex["OP.ALQ"] = "N"
     df_prinex["D347"] = "N"
     df_prinex["DIARIO1"] = 1
-
+    df_prinex["TIPO.FRA"] = "C"
     df_prinex["PAGADA"] = "S"
     df_prinex["CTA_BANCO"] = "5720"
     df_prinex["SCTA_BANCO"] = "0000010"
@@ -164,17 +177,17 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
     # -----------------------------------------------------
     # TIPO.FRA y CODIGO condicional según Document Type
     # -----------------------------------------------------
-    df_prinex["TIPO.FRA"] = np.where(
-        df_payhawk["Document Type"] == "Receipt",
-        "C",
-        np.where(df_payhawk["Document Type"] == "Invoice", "F", "")
-    )
-
-    df_prinex["TIPO.FRA"] = np.where(
-        df_payhawk["Payment Type"] == "mileage",
-        "C",
-        df_prinex["TIPO.FRA"]
-    )
+    #df_prinex["TIPO.FRA"] = np.where(
+    #    df_payhawk["Document Type"] == "Receipt",
+    #    "C",
+    #    np.where(df_payhawk["Document Type"] == "Invoice", "F", "")
+    #)
+    #
+    #df_prinex["TIPO.FRA"] = np.where(
+    #    df_payhawk["Payment Type"] == "mileage",
+    #    "C",
+    #    df_prinex["TIPO.FRA"]
+    #)
 
     df_prinex["CODIGO"] = np.where(
         df_payhawk["Document Type"] == "Invoice",
@@ -264,9 +277,17 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
             idx = row.name
             sufix = str(sufix_account.iloc[idx]).strip() if idx < len(sufix_account) else ""
 
+            # Si no hay proyecto, devolvemos el sufijo original
             if not promo_id or promo_id.lower() in ["nan", "none"]:
                 return sufix
-            return promo_id + sufix[len(promo_id):]
+            
+            # Lógica nueva: Si es 555 o 777, el SCTA_GASTO es íntegramente el sufijo (lo que hay a la derecha del '-')
+            if "555" in promo_id or "777" in promo_id:
+                return sufix
+            
+            # Para el resto de valores, sustituimos los 3 primeros dígitos del sufijo por el proyecto (PPP)
+            # Si querías el texto literal "PPP", cambia promo_id por "PPP"
+            return promo_id + sufix[3:]
 
         df_prinex["SCTA_GASTO"] = df_payhawk.apply(construir_scta_combinada, axis=1)
 
@@ -276,7 +297,95 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
             df_prinex[col] = df_prinex[col].astype(str).replace(['nan', 'None', 'NaN'], '')
 
     df_prinex = df_prinex.fillna("")
-    
+
+    # -----------------------------------------------------
+    # LÓGICA DE PARTIDAS SEGÚN PROYECTO Y CATEGORÍA
+    # -----------------------------------------------------
+    def asignar_partidas(row):
+        idx = row.name
+        
+        # Leemos los valores directamente del dataframe de Payhawk original
+        proyecto = ""
+        if "Promoción External ID" in df_payhawk.columns:
+            proyecto = str(df_payhawk.loc[idx, "Promoción External ID"]).strip()
+            
+        categoria = ""
+        if "Expense Category" in df_payhawk.columns:
+            categoria = str(df_payhawk.loc[idx, "Expense Category"]).strip()
+        
+        # Variables por defecto
+        tipo_partida, apartado, capitulo, partida = "", "", "", ""
+        
+        # 1. Gestión si el Proyecto CONTIENE 555 o 777
+        if "555" in proyecto or "777" in proyecto:
+            if categoria == "Desplazamientos":
+                tipo_partida = "G"
+                apartado = "01"
+                capitulo = "40"
+                partida = "040"
+            elif categoria == "Dietas":
+                tipo_partida = "G"
+                apartado = "01"
+                capitulo = "10"
+                partida = "060"
+            elif categoria == "Gasolina":
+                tipo_partida = "G"
+                apartado = "01"
+                capitulo = "40"
+                partida = "020"
+            elif categoria == "Material Obra":
+                tipo_partida = "G"
+                apartado = "01"
+                capitulo = "20"
+                partida = "040"
+            elif categoria == "Material Oficina":
+                tipo_partida = "G"
+                apartado = "01"
+                capitulo = "20"
+                partida = "040"
+            elif categoria == "Varios":
+                tipo_partida = "G"
+                apartado = "01"
+                capitulo = "90"
+                partida = "999"
+
+        # 2. Gestión para CUALQUIER OTRO Proyecto
+        else:
+            if categoria == "Desplazamientos":
+                tipo_partida = "G"
+                apartado = "03"
+                capitulo = "30"
+                partida = "040"
+            elif categoria == "Dietas":
+                tipo_partida = "G"
+                apartado = "03"
+                capitulo = "10"
+                partida = "060"
+            elif categoria == "Gasolina":
+                tipo_partida = "G"
+                apartado = "03"
+                capitulo = "30"
+                partida = "020"
+            elif categoria == "Material Obra":
+                tipo_partida = "G"
+                apartado = "03"
+                capitulo = "20"
+                partida = "040"
+            elif categoria == "Material Oficina":
+                tipo_partida = "G"
+                apartado = "03"
+                capitulo = "20"
+                partida = "040"
+            elif categoria == "Varios":
+                tipo_partida = "G"
+                apartado = "03"
+                capitulo = "90"
+                partida = "999"
+        return pd.Series([tipo_partida, apartado, capitulo, partida])
+
+    # Aplicamos la función
+    df_prinex[["TIPO_PARTIDA", "APARTADO", "CAPITULO", "PARTIDA"]] = df_prinex.apply(asignar_partidas, axis=1)
+
     # -----------------------------------------------------
     # RENOMBRAR Y COMBINAR PDFs SEGÚN COLUMNAS 'File Name X'
     # -----------------------------------------------------
