@@ -161,7 +161,7 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
     df_prinex["OP.ALQ"] = "N"
     df_prinex["D347"] = "N"
     df_prinex["DIARIO1"] = 1
-    df_prinex["TIPO.FRA"] = "C"
+    
     df_prinex["PAGADA"] = "S"
     df_prinex["CTA_BANCO"] = "5720"
     df_prinex["SCTA_BANCO"] = "0000010"
@@ -177,17 +177,17 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
     # -----------------------------------------------------
     # TIPO.FRA y CODIGO condicional según Document Type
     # -----------------------------------------------------
-    #df_prinex["TIPO.FRA"] = np.where(
-    #    df_payhawk["Document Type"] == "Receipt",
-    #    "C",
-    #    np.where(df_payhawk["Document Type"] == "Invoice", "F", "")
-    #)
-    #
-    #df_prinex["TIPO.FRA"] = np.where(
-    #    df_payhawk["Payment Type"] == "mileage",
-    #    "C",
-    #    df_prinex["TIPO.FRA"]
-    #)
+    df_prinex["TIPO.FRA"] = np.where(
+        df_payhawk["Document Type"] == "Receipt",
+        "C",
+        np.where(df_payhawk["Document Type"] == "Invoice", "F", "")
+    )
+    
+    df_prinex["TIPO.FRA"] = np.where(
+        df_payhawk["Payment Type"] == "mileage",
+        "C",
+        df_prinex["TIPO.FRA"]
+    )
 
     df_prinex["CODIGO"] = np.where(
         df_payhawk["Document Type"] == "Invoice",
