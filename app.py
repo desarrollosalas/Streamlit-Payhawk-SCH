@@ -223,11 +223,13 @@ def procesar_zip_payhawk(zip_bytes_payhawk, fecha_elegida):
             continue
 
         if prinex_col == "NUM.FRA":
-            df_prinex[prinex_col] = np.where(
+            num_fra_base = np.where(
                 df_payhawk["Payment Type"] == "mileage",
                 "KM-" + df_payhawk["Expense ID"].astype(str),
-                df_payhawk[payhawk_col]
+                df_payhawk[payhawk_col].astype(str)
             )
+            # Prefijamos con ORDEN (Expense ID) para garantizar que NUM.FRA sea siempre único
+            df_prinex[prinex_col] = df_prinex["ORDEN"].astype(str) + "-" + num_fra_base
         else:
             df_prinex[prinex_col] = df_payhawk[payhawk_col]
 
